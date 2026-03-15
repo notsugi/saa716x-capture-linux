@@ -45,6 +45,7 @@ MODULE_PARM_DESC(int_type, "force Interrupt Handler type: 0=INT-A, 1=MSI, 2=MSI-
 #define DRIVER_NAME	"SAA716x Capture"
 
 static void video_vip_worker(unsigned long data);
+void saa716x_irq_work_handler(struct work_struct *work);
 
 /*
 	1~4 HDMI input.
@@ -92,14 +93,21 @@ static int saa716x_cap_init_reg(struct saa716x_dev *saa716x)
 	SAA716x_EPWR(GREG, GREG_FGPI_CTRL, 0x321);
 	SAA716x_EPWR(GREG, GREG_VIDEO_IN_CTRL, 0x0C);
 
-	/* came from windows driver */
 	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_L, MSI_INT_TAGACK_AI_0);
+
+	/* tda19978 interrupt config */
 	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_EXTINT_5);
+	SAA716x_EPWR(MSI, MSI_CONFIG38, MSI_INT_POL_EDGE_FALL);
+	/* adv7611 interrupt config */
+	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_EXTINT_6);
+	SAA716x_EPWR(MSI, MSI_CONFIG39, MSI_INT_POL_EDGE_FALL);
+	/* ad9983? */
+	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_EXTINT_8);
+	SAA716x_EPWR(MSI, MSI_CONFIG41, MSI_INT_POL_EDGE_FALL);
 
 	//SAA716x_EPWR(MSI, MSI_INT_ENA_SET_L, MSI_INT_OVRFLW_VI0_0);
-	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_UNMAPD_TC_INT);
-	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_I2CINT_0);
-	SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_I2CINT_1);
+	//SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_I2CINT_0);
+	//SAA716x_EPWR(MSI, MSI_INT_ENA_SET_H, MSI_INT_I2CINT_1);
 	
 	return 0;
 }
@@ -209,14 +217,26 @@ static int saa716x_cap_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 	err = saa716x_v4l2_init(saa716x);
 	if (err) {
 		dprintk(SAA716x_ERROR, 1, "SAA716x V4L2 initialization failed");
+		goto fail4;
 	}
+
+	saa716x->irq_work_queue = create_singlethread_workqueue(saa716x->v4l2_dev.name);
+	if (saa716x->irq_work_queue == NULL) {
+		dprintk(SAA716x_ERROR, 1, "Could not create workqueue");
+		err = -ENOMEM;
+		goto fail5;
+	}
+
+	INIT_WORK(&saa716x->irq_work, saa716x_irq_work_handler);
 
 	err = saa716x_make_debugfs(saa716x);
 
 	return 0;
 
-fail4:
+fail5:
 	saa716x_v4l2_exit(saa716x);
+fail4:
+	saa716x_vip_exit2(saa716x, saa716x->config->capture_config.vip_port);
 fail3:
 	saa716x_i2c_exit(saa716x);
 fail2:
@@ -232,9 +252,11 @@ static void saa716x_cap_pci_remove(struct pci_dev *pdev)
 	struct saa716x_dev *saa716x = pci_get_drvdata(pdev);
 
 	saa716x_remove_debugfs(saa716x);
+	flush_workqueue(saa716x->irq_work_queue);
 	saa716x_v4l2_exit(saa716x);
 	saa716x_vip_exit2(saa716x, saa716x->config->capture_config.vip_port);
 	saa716x_i2c_exit(saa716x);
+	destroy_workqueue(saa716x->irq_work_queue);
 	saa716x_pci_exit(saa716x);
 	kfree(saa716x);
 }
@@ -318,7 +340,10 @@ static irqreturn_t saa716x_cap_pci_irq(int irq, void *dev_id)
 
 	if (stat_h) {
 		if (stat_h & MSI_INT_EXTINT_5) {
-			
+			//queue_work(saa716x->irq_work_queue, &saa716x->irq_work);
+		}
+		if (stat_h & MSI_INT_EXTINT_6) {
+			queue_work(saa716x->irq_work_queue, &saa716x->irq_work);
 		}
 	}
 
@@ -373,6 +398,13 @@ static void video_vip_worker(unsigned long data)
 
 		vip_entry->read_index = (vip_entry->read_index + 1) & 7;
 	} while (write_index != vip_entry->read_index);
+}
+
+/* Service routine to handle interrupts from receiver */
+void saa716x_irq_work_handler(struct work_struct *work) {
+	struct saa716x_dev *saa716x = container_of(work, struct saa716x_dev, irq_work);
+	
+	v4l2_subdev_call(saa716x->saa716x_stream[0].sd_receiver, core, interrupt_service_routine, 0, NULL);
 }
 
 /* Driver data */

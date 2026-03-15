@@ -5,6 +5,7 @@
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
+#include <linux/workqueue.h>
 #include <linux/mutex.h>
 
 #include <linux/pci.h>
@@ -192,7 +193,9 @@ struct saa716x_dev {
 	struct msix_entry		msix_entries[SAA716x_MSI_MAX_VECTORS];
 	struct saa716x_msix_entry	saa716x_msix_handler[56];
 	u8				handlers; /* no. of active handlers */
-
+	struct workqueue_struct		*irq_work_queue;
+	struct work_struct			irq_work;
+	
 	/* I2C */
 	struct saa716x_i2c		i2c[2];
 	u32				i2c_rate; /* init time */

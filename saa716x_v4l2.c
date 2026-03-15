@@ -84,8 +84,6 @@ static inline struct saa716x_cap_buffer *to_saa716x_cap_buffer(struct vb2_v4l2_b
 
 /*
  * HDTV: this structure has the capabilities of the HDTV receiver.
- * It is used to constrain the huge list of possible formats based
- * upon the hardware capabilities.
  */
 static const struct v4l2_dv_timings_cap saa716x_cap_timings_cap = {
 	.type = V4L2_DV_BT_656_1120,
@@ -102,8 +100,7 @@ static const struct v4l2_dv_timings_cap saa716x_cap_timings_cap = {
 };
 
 /*
- * Supported SDTV standards. This does the same job as skel_timings_cap, but
- * for standard TV formats.
+ * Supported SDTV standards.
  */
 #define SAA716X_TVNORMS V4L2_STD_ALL
 
@@ -188,12 +185,8 @@ static void buffer_queue(struct vb2_buffer *vb)
 	struct saa716x_cap_buffer *buf = to_saa716x_cap_buffer(vbuf);
 	struct sg_table *sg_desc = vb2_dma_sg_plane_desc(vb, 0);
 	struct saa716x_dmabuf *dmabuf;
-	int vip_port = s->vip_port;
 	unsigned long flags;
 
-	size_t sizes[2] = {SAA716x_PAGE_SIZE * 512, 0};
-	struct scatterlist *sg_out[2];
-	int sg_out_nents[2];
 	int ret;
 	
 	//printk("%s: called", __func__);
@@ -201,18 +194,18 @@ static void buffer_queue(struct vb2_buffer *vb)
 	list_add_tail(&buf->list, &s->buf_list);
 	spin_unlock_irqrestore(&s->qlock, flags);
 
-	sg_info("sg_desc->sgl", sg_desc->sgl);
+	//sg_info("sg_desc->sgl", sg_desc->sgl);
 
 	printk("%s: buffer enqued at PTE %d", __func__, s->mmu_q_index);
 	if (s->format.sizeimage <= SAA716x_PAGE_SIZE * 512) {
 		/* single channel DMA */
-		dmabuf = &s->saa716x->vip[vip_port].dma_buf[0][s->mmu_q_index];
+		dmabuf = &s->saa716x->vip[s->vip_port].dma_buf[0][s->mmu_q_index];
 		saa716x_dmabuf_sgpagefill(dmabuf, sg_desc->sgl, sg_desc->nents, 0);
 	} else {
 		/* dual channel DMA */
-		dmabuf = &s->saa716x->vip[vip_port].dma_buf[0][s->mmu_q_index];
+		dmabuf = &s->saa716x->vip[s->vip_port].dma_buf[0][s->mmu_q_index];
 		saa716x_dmabuf_sgpagefill(dmabuf, sg_desc->sgl, sg_desc->nents, 0);
-		dmabuf = &s->saa716x->vip[vip_port].dma_buf[1][s->mmu_q_index];
+		dmabuf = &s->saa716x->vip[s->vip_port].dma_buf[1][s->mmu_q_index];
 		saa716x_dmabuf_sgpagefill(dmabuf, sg_desc->sgl, sg_desc->nents, SAA716x_PAGE_SIZE * 512);
 	}
 	s->mmu_q_index = (s->mmu_q_index + 1) & 7;
@@ -243,14 +236,13 @@ static int start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct saa716x_stream *s = vb2_get_drv_priv(vq);
 	struct saa716x_dev *saa716x = s->saa716x;
-	int vip_port = saa716x->config->capture_config.vip_port;
 	int ret = 0;
 
 	printk("%s: called", __func__);
 	s->sequence = 0;
 
 	/* start DMA */
-	ret = saa716x_vip_start(saa716x, vip_port, 0, &s->vip_params);
+	ret = saa716x_vip_start(saa716x, s->vip_port, 0, &s->vip_params);
 
 	if (ret) {
 		/*
@@ -311,13 +303,7 @@ static void saa716x_cap_fill_pix_format(struct saa716x_stream *s,
 				     struct v4l2_pix_format *pix)
 {
 	pix->pixelformat = V4L2_PIX_FMT_YUYV;
-	if (s->input == 1) {
-		/* YPbPr input */
-		pix->width = 720;
-		pix->height = (s->std & V4L2_STD_525_60) ? 480 : 576;
-		pix->field = V4L2_FIELD_INTERLACED;
-		pix->colorspace = V4L2_COLORSPACE_SMPTE170M;
-	} else {
+	if (s->input == 0) {
 		/* HDMI input */
 		pix->width = s->timings.bt.width;
 		pix->height = s->timings.bt.height;
@@ -328,6 +314,12 @@ static void saa716x_cap_fill_pix_format(struct saa716x_stream *s,
 			pix->field = V4L2_FIELD_NONE;
 		}
 		pix->colorspace = V4L2_COLORSPACE_REC709;
+	} else {
+		/* YPbPr input */
+		pix->width = 720;
+		pix->height = (s->std & V4L2_STD_525_60) ? 480 : 576;
+		pix->field = V4L2_FIELD_INTERLACED;
+		pix->colorspace = V4L2_COLORSPACE_SMPTE170M;
 	}
 
 	/*
@@ -481,14 +473,14 @@ static int saa716x_cap_enum_input(struct file *file, void *priv,
 		return -EINVAL;
 
 	i->type = V4L2_INPUT_TYPE_CAMERA;
-	if (i->index == 1) {
-		i->std = SAA716X_TVNORMS;
-		strlcpy(i->name, "YPbPr", sizeof(i->name));
-		i->capabilities = V4L2_IN_CAP_STD;
-	} else {
+	if (i->index == 0) {
 		i->std = 0;
 		strlcpy(i->name, "HDMI", sizeof(i->name));
 		i->capabilities = V4L2_IN_CAP_DV_TIMINGS;
+	} else {
+		i->std = SAA716X_TVNORMS;
+		strlcpy(i->name, "YPbPr", sizeof(i->name));
+		i->capabilities = V4L2_IN_CAP_STD;
 	}
 	return 0;
 }
@@ -496,7 +488,6 @@ static int saa716x_cap_enum_input(struct file *file, void *priv,
 static int saa716x_cap_s_input(struct file *file, void *priv, unsigned int i)
 {
 	struct saa716x_stream *s = video_drvdata(file);
-	struct v4l2_subdev *sd = s->sd_receiver;
 
 	if (i > 1)
 		return -EINVAL;
@@ -524,7 +515,6 @@ static int saa716x_cap_s_input(struct file *file, void *priv, unsigned int i)
 static int saa716x_cap_g_input(struct file *file, void *priv, unsigned int *i)
 {
 	struct saa716x_stream *s = video_drvdata(file);
-	struct v4l2_subdev *sd = s->sd_receiver;
 
 	*i = s->input;
 	return 0;
@@ -689,6 +679,7 @@ static int saa716x_cap_querystd(struct file *file, void *priv, v4l2_std_id *std)
 	return 0;
 }
 
+/* When ffmpeg opens v4l2 video device, it call this ioctl */
 static int saa716x_cap_g_parm(struct file *file, void *fh, struct v4l2_streamparm *parm)
 {
 	struct saa716x_stream *s = video_drvdata(file);
@@ -962,7 +953,7 @@ static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params,
 /* Subdev & Platform data */
 static struct adv76xx_platform_data adv7611_pdata = {
 	.disable_cable_det_rst = 1,
-	.int1_config = ADV76XX_INT1_CONFIG_OPEN_DRAIN,
+	.int1_config = ADV76XX_INT1_CONFIG_ACTIVE_LOW,
 	.alt_gamma = 0,
 	.blank_data = 1,
 	.insert_av_codes = 1,

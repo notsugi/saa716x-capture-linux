@@ -84,6 +84,8 @@ Example using FFmpeg:
 ffmpeg -f v4l2 -i /dev/video0 capture.raw
 ```
 
+キャプチャ映像に水平方向の細いノイズが入る場合、おそらくCPUの省電力機能が影響しています。
+`cpupower`コマンドでC3,C6 stateを無効にしてみてください。
 
 ## 不具合・未実装の機能
 

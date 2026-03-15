@@ -23,11 +23,6 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 
-#include "saa716x_priv.h"
-#include "saa716x_cap.h"
-#include "saa716x_vip_reg.h"
-#include "saa716x_mod.h"
-
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-mediabus.h>
 
@@ -493,6 +488,7 @@ tda19978_setup_format(struct tda19978_state *state, u32 code)
 
 	return 0;
 }
+
 /*
 * The color conversion matrix will convert between the colorimetry of the
 * HDMI input to the desired output format RGB|YUV. RGB output is to be
@@ -633,10 +629,10 @@ tda19978_configure_vhref(struct v4l2_subdev *sd)
 
 	/* Set Pixel And Line Counters */
 	if (state->chip_revision == 0)
-		io_write(sd, REG_PXCNT_PR, 4); //REG_PXCNT_PR
+		io_write(sd, REG_PXCNT_PR, 4);
 	else
 		io_write(sd, REG_PXCNT_PR, 1);
-	io_write16(sd, REG_PXCNT_NPIX, width & MASK_VHREF); //REG_PXCNT_NPIX
+	io_write16(sd, REG_PXCNT_NPIX, width & MASK_VHREF);
 	io_write(sd, REG_LCNT_PR, 1);
 	io_write16(sd, REG_LCNT_NLIN, lines & MASK_VHREF);
 
@@ -646,7 +642,7 @@ tda19978_configure_vhref(struct v4l2_subdev *sd)
 	 * detection algorithms and forcing predefined modes (480i & 576i)
 	 */
 	reg = VHREF_STD_DET_OFF << VHREF_STD_DET_SHIFT;
-	io_write(sd, REG_VHREF_CTRL, reg); //REG_VHREF_CTRL
+	io_write(sd, REG_VHREF_CTRL, reg);
 
 	/*
 	 * Configure the VHRef timing values. In case the VHREF generator has
@@ -657,20 +653,20 @@ tda19978_configure_vhref(struct v4l2_subdev *sd)
 	/* horizontal reference start/end */
 	reg = ((href_start & MASK_VHREF) & 0xf00) >> 4;
 	reg |= ((href_end & MASK_VHREF) & 0xf00) >> 8;
-	io_write(sd, REG_HREF_S, (href_start & MASK_VHREF) & 0xff); //REG_HREF_S
+	io_write(sd, REG_HREF_S, (href_start & MASK_VHREF) & 0xff);
 	io_write(sd, REG_HREF_S+1, reg);
-	io_write(sd, REG_HREF_E, (href_end & MASK_VHREF) & 0xff); //REG_HREF_E
+	io_write(sd, REG_HREF_E, (href_end & MASK_VHREF) & 0xff);
 	/* vertical reference f1 start/end */
-	io_write16(sd, REG_VREF_F1_S, vref_f1_start & MASK_VHREF); //REG_VREF_F1_S
-	io_write(sd, REG_VREF_F1_WIDTH, vref_f1_width); //REG_VREF_F1_WIDTH
+	io_write16(sd, REG_VREF_F1_S, vref_f1_start & MASK_VHREF);
+	io_write(sd, REG_VREF_F1_WIDTH, vref_f1_width);
 	/* vertical reference f2 start/end */
-	io_write16(sd, REG_VREF_F2_S, vref_f2_start & MASK_VHREF); //REG_VREF_F2_S
-	io_write(sd, REG_VREF_F2_WIDTH, vref_f2_width); //REG_VREF_F2_WIDTH
+	io_write16(sd, REG_VREF_F2_S, vref_f2_start & MASK_VHREF);
+	io_write(sd, REG_VREF_F2_WIDTH, vref_f2_width);
 
 	/* F1/F2 FREF, field polarity */
 	reg = field_polarity;
-	io_write(sd, REG_FREF_F1_S, reg); //REG_FREF_F1_S
-	io_write16(sd, REG_FREF_F2_S, fieldref_f2_start & MASK_VHREF); //REG_FREF_F2_S
+	io_write(sd, REG_FREF_F1_S, reg);
+	io_write16(sd, REG_FREF_F2_S, fieldref_f2_start & MASK_VHREF);
 }
 
 static int tda19978_check_port(struct v4l2_subdev *sd) {
@@ -716,9 +712,9 @@ tda19978_detect_std(struct tda19978_state *state,
 	 *   REG_H_PER: Period of a line in MCLK(27MHz) cycles
 	 *   REG_HS_WIDTH: Period of horiz sync pulse in MCLK(27MHz) cycles
 	 */
-	vper = io_read24(sd, 0x0019) & MASK_VPER;
-	hper = io_read16(sd, 0x001C) & MASK_HPER;
-	hsper = io_read16(sd, 0x001E) & MASK_HSWIDTH;
+	vper = io_read24(sd, REG_V_PER) & MASK_VPER;
+	hper = io_read16(sd, REG_H_PER) & MASK_HPER;
+	hsper = io_read16(sd, REG_HS_WIDTH) & MASK_HSWIDTH;
 	v4l2_dbg(1, debug, sd, "Signal Timings: %u/%u/%u\n", vper, hper, hsper);
 
 	if (!tda19978_check_port(sd))
@@ -738,7 +734,7 @@ tda19978_detect_std(struct tda19978_state *state,
 			lines /= 2;
 		/* vper +/- 0.7% */
 		vmin = ((27000000 / 1000) * 993) / _hper * lines;
-		vmax = ((27000000 / 1000) * 1007) / _hper * lines;
+		vmax = ((27000000 / 1000) * 1008) / _hper * lines;
 		/* hper +/- 1.0% */
 		hmin = ((27000000 / 100) * 99) / _hper;
 		hmax = ((27000000 / 100) * 101) / _hper;
@@ -957,10 +953,8 @@ tda19978_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	hper = io_read16(sd, REG_H_PER) & MASK_HPER;
 	hsper = io_read16(sd, REG_HS_WIDTH) & MASK_HSWIDTH;
 	/*
-	 * The tda19978 supports A/B inputs but only a single output.
-	 * The irq handler monitors for timing changes on both inputs and
-	 * sets the input_detect array to 0|1 depending on signal presence.
-	 * I believe selection of A vs B is automatic.
+	 * The tda19978 supports A/B/C/D inputs but only a single output.
+	 * I believe selection of A/B/C/D is automatic.
 	 */
 	tda19978_check_port(sd);
 	
@@ -1717,6 +1711,11 @@ static int tda19978_probe(struct i2c_client *client,
 	/* disable/reset HDCP to get correct I2C access to Rx HDMI */
 	// io_write(sd, REG_MAN_SUS_HDMI_SEL, MAN_RST_HDCP | MAN_DIS_HDCP);
 
+	/*
+	 * TDA19978 does not have HPD assertion pin. 
+	 * Instead, HPD signal is asserted by PCA9536 I2C IO expander
+	 * implemented on PCB with TDA19978.
+	 */
 	hpd_client = i2c_new_ancillary_device(client, "hpd", 0x41);
 	if (IS_ERR(hpd_client))
 	{
