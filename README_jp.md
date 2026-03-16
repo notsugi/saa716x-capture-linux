@@ -61,7 +61,7 @@ sudo rmmod saa716x_capture saa716x_core
 ```
 
 
-### 動作テスト
+### デバイスの確認
 
 List video devices:
 
@@ -78,11 +78,20 @@ v4l2-ctl --all
 
 ## キャプチャの実行
 
-Example using FFmpeg:
+アプリケーションにキャプチャデータを正常に渡すために、入力信号のタイミングを元にボードを手動で設定する必要があります。
 
 ```
-ffmpeg -f v4l2 -i /dev/video0 capture.raw
+v4l2-ctl -d <X> --query-dv-timings
+v4l2-ctl -d <X> --set-dv-bt-timings index=<N>
 ```
+
+解像度やリフレッシュレートの変更が生じる度に行ってください。
+アプリケーションにキャプチャデータを渡す準備ができたので、ffmpeg等でデバイスファイルを指定してキャプチャを開始できます。
+
+```
+ffmpeg -f v4l2 -i /dev/video<X> capture.raw
+```
+
 
 キャプチャ映像に水平方向の細いノイズが入る場合、おそらくCPUの省電力機能が影響しています。
 `cpupower`コマンドでC3,C6 stateを無効にしてみてください。
@@ -93,23 +102,21 @@ This driver is still under development and several areas require further work.
 
 The following limitations are currently known:
 
-**HDMI event interrupt handling is not implemented**
 
-The driver currently does not implement interrupt handling for HDMI events such as:
+**インターレース入力に未対応**
 
-* signal detection
-* input format change
-* hotplug notifications
+**HDMIイベントの割り込み処理が不完全**
 
-**Frame drops may occur at high frame rates**
+データシートが入手出来ないため、tda19978の割り込み処理は未実装です。
+
+**まれにフレーム落ちが発生する**
 
 Under certain conditions (e.g. high resolution or high frame rate capture), frame drops may occur.
 Further investigation of the DMA pipeline and buffer management is required.
 
-**Audio capture is not supported**
+**音声キャプチャ機能がない**
 
-The current implementation supports **video capture only**.
-HDMI audio capture has not yet been implemented.
+今のところサポートしているのは動画のキャプチャのみです。
 
 
 ## TODO
