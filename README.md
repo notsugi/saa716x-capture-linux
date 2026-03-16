@@ -91,10 +91,18 @@ v4l2-ctl --all
 
 # Capture Example
 
-Example using FFmpeg:
+Query current source timing info and configure format first.
+`<N>` is selected from `--list-dv-timings` output which matched result of the query.
 
 ```
-ffmpeg -f v4l2 -i /dev/video0 capture.raw
+v4l2-ctl -d <X> --query-dv-timings
+v4l2-ctl -d <X> --set-dv-bt-timings index=<N>
+```
+
+Then the device is ready to stream video data to applications.
+
+```
+ffmpeg -f v4l2 -i /dev/video<X> capture.raw
 ```
 
 ---
