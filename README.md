@@ -105,13 +105,11 @@ This driver is still under development and several areas require further work.
 
 The following limitations are currently known:
 
-**HDMI event interrupt handling is not implemented**
+**Interlaced video captureing is not supported**
 
-The driver currently does not implement interrupt handling for HDMI events such as:
+**HDMI event interrupt handling is implemented partially**
 
-* signal detection
-* input format change
-* hotplug notifications
+The driver currently does not implement interrupt handling for TDA19978 due to lack of datasheet.
 
 **Frame drops may occur at high frame rates**
 
@@ -129,7 +127,8 @@ HDMI audio capture has not yet been implemented.
 
 Future work includes:
 
-* HDMI interrupt handling
+* Interlaced video support
+* TDA19978 interrupt handling
 * Investigation and mitigation of frame drops during high-FPS capture
 * HDMI audio capture support
 * Additional testing on different kernel versions
