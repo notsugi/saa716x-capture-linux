@@ -11,6 +11,7 @@
 #include <linux/vmalloc.h>
 #include <linux/init.h>
 #include <linux/device.h>
+#include <linux/version.h>
 
 #include <linux/signal.h>
 #include <linux/sched.h>
@@ -156,6 +157,19 @@ static int saa716x_cap_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 	saa716x->module		= THIS_MODULE;
 	saa716x->config		= (struct saa716x_config *) pci_id->driver_data;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 3, 0)
+	saa716x->irq_work_queue = create_singlethread_workqueue(saa716x->v4l2_dev.name);
+#else
+	saa716x->irq_work_queue = alloc_workqueue(saa716x->v4l2_dev.name, WQ_UNBOUND, 1);
+#endif
+	if (saa716x->irq_work_queue == NULL) {
+		dprintk(SAA716x_ERROR, 1, "Could not create workqueue");
+		err = -ENOMEM;
+		goto fail1;
+	}
+
+	INIT_WORK(&saa716x->irq_work, saa716x_irq_work_handler);
+
 	err = saa716x_pci_init(saa716x);
 	if (err) {
 		dprintk(SAA716x_ERROR, 1, "SAA716x PCI Initialization failed");
@@ -220,14 +234,6 @@ static int saa716x_cap_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 		goto fail4;
 	}
 
-	saa716x->irq_work_queue = create_singlethread_workqueue(saa716x->v4l2_dev.name);
-	if (saa716x->irq_work_queue == NULL) {
-		dprintk(SAA716x_ERROR, 1, "Could not create workqueue");
-		err = -ENOMEM;
-		goto fail5;
-	}
-
-	INIT_WORK(&saa716x->irq_work, saa716x_irq_work_handler);
 
 	err = saa716x_make_debugfs(saa716x);
 
@@ -381,7 +387,15 @@ static void video_vip_worker(unsigned long data)
 		return;
 	}
 
-	do {
+	do {	
+		if ((s->vip_params.stream_flags & VIP_FIELD_SEQ) ||
+			(s->vip_params.stream_flags & (VIP_EVEN_FIELD | VIP_ODD_FIELD))) {
+			if (vip_entry->read_index % 2 == 0) {
+				vip_entry->read_index = (vip_entry->read_index + 1) & 7;
+				continue;
+			}
+		}
+
 		spin_lock(&s->qlock);
 		if (list_empty(&s->buf_list)) {
 			printk("%s: vb2_queue is empty !", __func__);
@@ -392,9 +406,11 @@ static void video_vip_worker(unsigned long data)
 		list_del(&cb->list);
 		spin_unlock(&s->qlock);
 		
+		cb->vb.field = s->field;
 		cb->vb.vb2_buf.timestamp = ktime_get_ns();
 		cb->vb.sequence = s->sequence++;
 		vb2_buffer_done(&cb->vb.vb2_buf, VB2_BUF_STATE_DONE);
+		printk("%s: vb2_buffer(%d) returned", __func__, cb->vb.vb2_buf.index);
 
 		vip_entry->read_index = (vip_entry->read_index + 1) & 7;
 	} while (write_index != vip_entry->read_index);

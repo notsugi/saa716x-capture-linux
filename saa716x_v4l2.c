@@ -33,8 +33,8 @@
 #include "saa716x_v4l2.h"
 #include "saa716x_vip_reg.h"
 
-static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params, struct v4l2_dv_timings *timings);
-static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params, struct v4l2_dv_timings *timings);
+static int video_vip_get_stream_params_tda19978(struct saa716x_stream *s);
+static int video_vip_get_stream_params_adv7611(struct saa716x_stream *s);
 
 static const u32 vi_ch[] = {
     VI0,
@@ -151,7 +151,9 @@ static int queue_setup(struct vb2_queue *vq,
 		return sizes[0] < s->format.sizeimage ? -EINVAL : 0;
 	*nplanes = 1;
 	sizes[0] = s->format.sizeimage;
+	printk("%s: field = 0x%x", __func__, s->format.field);
 	printk("%s: sizeimage = 0x%x", __func__, s->format.sizeimage);
+
 	return 0;
 }
 
@@ -196,7 +198,7 @@ static void buffer_queue(struct vb2_buffer *vb)
 
 	//sg_info("sg_desc->sgl", sg_desc->sgl);
 
-	printk("%s: buffer enqued at PTE %d", __func__, s->mmu_q_index);
+	printk("%s: vb2_buffer(%d) enqued at PTE %d", __func__, vb->index, s->mmu_q_index);
 	if (s->format.sizeimage <= SAA716x_PAGE_SIZE * 512) {
 		/* single channel DMA */
 		dmabuf = &s->saa716x->vip[s->vip_port].dma_buf[0][s->mmu_q_index];
@@ -208,7 +210,12 @@ static void buffer_queue(struct vb2_buffer *vb)
 		dmabuf = &s->saa716x->vip[s->vip_port].dma_buf[1][s->mmu_q_index];
 		saa716x_dmabuf_sgpagefill(dmabuf, sg_desc->sgl, sg_desc->nents, SAA716x_PAGE_SIZE * 512);
 	}
-	s->mmu_q_index = (s->mmu_q_index + 1) & 7;
+	if ((s->vip_params.stream_flags & VIP_FIELD_SEQ) ||
+		(s->vip_params.stream_flags & (VIP_EVEN_FIELD | VIP_ODD_FIELD))) {
+		s->mmu_q_index = (s->mmu_q_index + 1) & 3;
+	} else {
+		s->mmu_q_index = (s->mmu_q_index + 1) & 7;
+	}
 }
 
 static void return_all_buffers(struct saa716x_stream *s,
@@ -308,8 +315,15 @@ static void saa716x_cap_fill_pix_format(struct saa716x_stream *s,
 		pix->width = s->timings.bt.width;
 		pix->height = s->timings.bt.height;
 		if (s->timings.bt.interlaced) {
-			pix->field = V4L2_FIELD_ALTERNATE;
-			pix->height /= 2;
+			switch (pix->field) {
+				case V4L2_FIELD_SEQ_TB:
+					break;	
+				case V4L2_FIELD_ALTERNATE:
+					pix->height /= 2;
+					break;
+				default:
+					pix->field = V4L2_FIELD_INTERLACED;
+			}
 		} else {
 			pix->field = V4L2_FIELD_NONE;
 		}
@@ -340,7 +354,6 @@ static int saa716x_cap_s_dv_timings(struct file *file, void *_fh,
 {
 	struct saa716x_stream *s = video_drvdata(file);
 	struct v4l2_subdev *sd = s->sd_receiver;
-    enum saa716x_capture_subdev sd_type = s->saa716x->config->capture_config.subdev;
 	int err;
 
 	printk("%s: called", __func__);
@@ -373,17 +386,9 @@ static int saa716x_cap_s_dv_timings(struct file *file, void *_fh,
 	}
 
 	s->timings = *timings;
-	/* set vip parameters based on dv-timings */
-	if (sd_type == SAA716x_SUBDEV_TDA19978) {
-		err = video_vip_get_stream_params_tda19978(&s->vip_params, &s->timings);
-	} else {
-		err = video_vip_get_stream_params_adv7611(&s->vip_params, &s->timings);
-	}
-	if (err)
-		return -EINVAL;
-	
 	/* Update the internal format */
 	saa716x_cap_fill_pix_format(s, &s->format);
+
 	return 0;
 }
 
@@ -562,6 +567,7 @@ static int saa716x_cap_s_fmt_vid_cap(struct file *file, void *priv,
 				  struct v4l2_format *f)
 {
 	struct saa716x_stream *s = video_drvdata(file);
+    enum saa716x_capture_subdev sd_type = s->saa716x->config->capture_config.subdev;
 	int ret;
 
 	printk("%s: called", __func__);
@@ -578,6 +584,15 @@ static int saa716x_cap_s_fmt_vid_cap(struct file *file, void *priv,
 
 	/* TODO: change format */
 	s->format = f->fmt.pix;
+
+	/* set vip parameters */
+	if (sd_type == SAA716x_SUBDEV_TDA19978) {
+		ret = video_vip_get_stream_params_tda19978(s);
+	} else {
+		ret = video_vip_get_stream_params_adv7611(s);
+	}
+	if (ret)
+		return -EINVAL;
 	return 0;
 }
 
@@ -645,13 +660,6 @@ static int saa716x_cap_g_std(struct file *file, void *priv, v4l2_std_id *std)
 	return 0;
 }
 
-/*
- * Query the current standard as seen by the hardware. This function shall
- * never actually change the standard, it just detects and reports.
- * The framework will initially set *std to tvnorms (i.e. the set of
- * supported standards by this input), and this function should just AND
- * this value. If there is no signal, then *std should be set to 0.
- */
 static int saa716x_cap_querystd(struct file *file, void *priv, v4l2_std_id *std)
 {
 	struct saa716x_stream *s = video_drvdata(file);
@@ -679,7 +687,7 @@ static int saa716x_cap_querystd(struct file *file, void *priv, v4l2_std_id *std)
 	return 0;
 }
 
-/* When ffmpeg opens v4l2 video device, it call this ioctl */
+/* When ffmpeg/vlc opens v4l2 video device, it call this ioctl to get fps */
 static int saa716x_cap_g_parm(struct file *file, void *fh, struct v4l2_streamparm *parm)
 {
 	struct saa716x_stream *s = video_drvdata(file);
@@ -692,6 +700,7 @@ static int saa716x_cap_g_parm(struct file *file, void *fh, struct v4l2_streampar
 	parm->parm.capture.timeperframe.numerator = fps.numerator;
 	parm->parm.capture.timeperframe.denominator = fps.denominator;
 	parm->parm.capture.readbuffers = VIP_BUFFERS;
+	
 	return 0;
 }
 
@@ -808,9 +817,12 @@ static const struct v4l2_file_operations saa716x_cap_fops = {
 	VIP_FMT_TYPE2 should be set for interlaced video.
 	VIC code definitions are here: include/uapi/linux/v4l2-dv-timings.h
 */
-static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params, struct v4l2_dv_timings *timings)
-	{
+static int video_vip_get_stream_params_tda19978(struct saa716x_stream *s)
+{
+	struct vip_stream_params *params = &s->vip_params;
+	struct v4l2_dv_timings *timings = &s->timings;
 	u8 cea861_vic;
+
 	if (timings->type == V4L2_DV_BT_656_1120 && (timings->bt.flags & V4L2_DV_FL_HAS_CEA861_VIC)){
 		cea861_vic = timings->bt.cea861_vic;
 	} else {
@@ -820,6 +832,15 @@ static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params
 	params->source_format = VIP_FMT_TYPE2;
 	switch (cea861_vic)
 	{
+	case 2: /* 720x480p60 */
+		params->source_format = VIP_FMT_DEFAULT;
+		params->bits = 16;
+		params->samples = 720;
+		params->lines = 480;
+		params->pitch = 720 * 2;
+		params->offset_x = 0;
+		params->offset_y = 48;
+		break;
 	case 17: /* 720x576p50 */
 		params->source_format = VIP_FMT_DEFAULT;
 		params->bits = 16;
@@ -854,7 +875,7 @@ static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params
 		params->pitch = 1920 * 2;
 		params->offset_x = 276;
 		params->offset_y = 0; // relate with PSU_WINDOW
-		params->stream_flags = VIP_ODD_FIELD | VIP_EVEN_FIELD | VIP_INTERLACED | VIP_HD;
+		params->stream_flags = VIP_INTERLACED | VIP_HD;
 		break;
 	case 20: /* 1920x1080i50 */
 		params->bits = 16;
@@ -863,7 +884,7 @@ static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params
 		params->pitch = 1920 * 2;
 		params->offset_x = 716;
 		params->offset_y = 0;
-		params->stream_flags = VIP_ODD_FIELD | VIP_EVEN_FIELD | VIP_INTERLACED | VIP_HD;
+		params->stream_flags = VIP_INTERLACED | VIP_HD;
 		break;
 	case 32: /* 1920x1080p24 */
 	case 33: /* 1920x1080p25 */
@@ -880,12 +901,24 @@ static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params
 	default:
 		return -1;
 	}
+
+	if (s->format.field == V4L2_FIELD_ALTERNATE) {
+		params->stream_flags |= VIP_FIELD_ALTERNATE;
+	} else if (s->format.field == V4L2_FIELD_SEQ_TB) {
+		params->stream_flags |= VIP_FIELD_SEQ;
+	} else if (s->format.field == V4L2_FIELD_INTERLACED) {
+		params->stream_flags |= (VIP_ODD_FIELD | VIP_EVEN_FIELD);
+	}
+
 	return 0;
 }
 
-static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params, struct v4l2_dv_timings *timings)
+static int video_vip_get_stream_params_adv7611(struct saa716x_stream *s)
 {
+	struct vip_stream_params *params = &s->vip_params;
+	struct v4l2_dv_timings *timings = &s->timings;
 	u8 cea861_vic;
+
 	if (timings->type == V4L2_DV_BT_656_1120 && (timings->bt.flags & V4L2_DV_FL_HAS_CEA861_VIC)){
 		cea861_vic = timings->bt.cea861_vic;
 	} else {
@@ -895,6 +928,14 @@ static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params,
 	params->source_format = VIP_FMT_DEFAULT;
 	switch (cea861_vic)
 	{
+	case 2: /* 720x480p60 */
+		params->bits = 16;
+		params->samples = 720;
+		params->lines = 480;
+		params->pitch = 720 * 2;
+		params->offset_x = 0;
+		params->offset_y = 48;
+		break;
 	case 17: /* 720x576p50 */
 		params->bits = 16;
 		params->samples = 720;
@@ -921,7 +962,7 @@ static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params,
 		params->pitch = 1920 * 2;
 		params->offset_x = 276;  // 0
 		params->offset_y = 0; // 20
-		params->stream_flags = VIP_ODD_FIELD | VIP_EVEN_FIELD | VIP_INTERLACED | VIP_HD;
+		params->stream_flags = VIP_INTERLACED | VIP_HD;
 		break;
 	case 20: /* 1920x1080i50 */
 		params->source_format = VIP_FMT_TYPE2;
@@ -931,7 +972,7 @@ static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params,
 		params->pitch = 1920 * 2;
 		params->offset_x = 716;
 		params->offset_y = 0;
-		params->stream_flags = VIP_ODD_FIELD | VIP_EVEN_FIELD | VIP_INTERLACED | VIP_HD;
+		params->stream_flags = VIP_INTERLACED | VIP_HD;
 		break;
 	case 32: /* 1920x1080p24 */
 	case 33: /* 1920x1080p25 */
@@ -947,12 +988,21 @@ static int video_vip_get_stream_params_adv7611(struct vip_stream_params *params,
 	default:
 		return -1;
 	}
+
+	if (s->format.field == V4L2_FIELD_ALTERNATE) {
+		s->vip_params.stream_flags |= VIP_FIELD_ALTERNATE;
+	} else if (s->format.field == V4L2_FIELD_SEQ_TB) {
+		s->vip_params.stream_flags |= VIP_FIELD_SEQ;
+	} else if (s->format.field == V4L2_FIELD_INTERLACED) {
+		s->vip_params.stream_flags |= (VIP_ODD_FIELD | VIP_EVEN_FIELD);
+	}
+
 	return 0;
 }
 
 /* Subdev & Platform data */
 static struct adv76xx_platform_data adv7611_pdata = {
-	.disable_cable_det_rst = 1,
+	.disable_cable_det_rst = 0,
 	.int1_config = ADV76XX_INT1_CONFIG_ACTIVE_LOW,
 	.alt_gamma = 0,
 	.blank_data = 1,
@@ -1018,7 +1068,7 @@ static int saa716x_subdev_init(struct saa716x_dev *saa716x)
 	switch (sd_type)
 	{
 		case SAA716x_SUBDEV_TDA19978: {
-			video_vip_get_stream_params_tda19978(&s->vip_params, &s->timings);
+			video_vip_get_stream_params_tda19978(s);
 			
 			struct v4l2_edid tda19978_edid = {
 				.pad = 0,
@@ -1031,10 +1081,19 @@ static int saa716x_subdev_init(struct saa716x_dev *saa716x)
 				return err;
 			break;
 		}
-		case SAA716x_SUBDEV_ADV7611_AD9983:
+		case SAA716x_SUBDEV_ADV7611_AD9983: {
+			/* AD9983 power down */
+			u8 pw_down[] = {0x1E, 0x08};
+			struct i2c_msg msg[] = {
+				{ .addr = 0x4d, .flags = 0, .buf = pw_down, .len = sizeof(pw_down) }, 
+			};
+			err = i2c_transfer(i2cadapter, msg, 1);
+			fallthrough;
+		}
 		case SAA716x_SUBDEV_ADV7611: {
-			video_vip_get_stream_params_adv7611(&s->vip_params, &s->timings);
+			video_vip_get_stream_params_adv7611(s);
 			
+			/* enable DLL_LLC mux */
 			u8 dll_llc_cfg[] = {0x19, 0x83};
 			u8 dll_llc_mux[] = {0x33, 0x40};
 			struct i2c_msg msg1[] = {
@@ -1043,11 +1102,10 @@ static int saa716x_subdev_init(struct saa716x_dev *saa716x)
 			struct i2c_msg msg2[] = {
 				{ .addr = 0x4c,	.flags = 0,	.buf = dll_llc_mux,	.len = sizeof (dll_llc_mux) },
 			};
-			
-			// enable DLL_LLC mux
+
 			err = i2c_transfer(i2cadapter, msg1, 1);
 			err = i2c_transfer(i2cadapter, msg2, 1);
-			
+
 			struct v4l2_subdev_format adv7611_fmt = {
 				.pad = ADV7611_PAD_SOURCE,
 				.which = V4L2_SUBDEV_FORMAT_ACTIVE,

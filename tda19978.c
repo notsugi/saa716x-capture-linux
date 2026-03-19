@@ -521,7 +521,7 @@ tda19978_configure_csc(struct v4l2_subdev *sd)
 	
 	state->conv = NULL;
 	switch (state->vid_fmt) {
-	/* YUV output */
+	/* To get correct color, we use ITU601 matrix for HD input */
 	case OF_FMT_422_SMPT: /* semi-planar */
 		//blanking_codes = &yuv_blanking;
 		if ((c->colorspace == V4L2_COLORSPACE_SRGB) &&
@@ -529,13 +529,13 @@ tda19978_configure_csc(struct v4l2_subdev *sd)
 			if (state->timings.bt.height <= 576)
 				state->conv = &conv_matrix[RGBFULL_ITU601];
 			else
-				state->conv = &conv_matrix[RGBFULL_ITU709];
+				state->conv = &conv_matrix[RGBFULL_ITU601];
 		} else if ((c->colorspace == V4L2_COLORSPACE_SRGB) &&
 			   (c->quantization == V4L2_QUANTIZATION_LIM_RANGE)) {
 			if (state->timings.bt.height <= 576)
 				state->conv = &conv_matrix[RGBLIMITED_ITU601];
 			else
-				state->conv = &conv_matrix[RGBLIMITED_ITU709];
+				state->conv = &conv_matrix[RGBLIMITED_ITU601];
 		}
 		break;
 	}

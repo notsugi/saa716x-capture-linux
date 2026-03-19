@@ -64,9 +64,10 @@ static int saa716x_vip_init_ptables(struct saa716x_dmabuf *dmabuf, int channel,
 
 	SAA716x_EPWR(MMU, config, (VIP_BUFFERS - 1));
 
-	if ((stream_params->stream_flags & VIP_INTERLACED) &&
+	if (stream_params->stream_flags & VIP_FIELD_SEQ || 
+		((stream_params->stream_flags & VIP_INTERLACED) &&
 	    (stream_params->stream_flags & VIP_ODD_FIELD) &&
-	    (stream_params->stream_flags & VIP_EVEN_FIELD)) {
+	    (stream_params->stream_flags & VIP_EVEN_FIELD))) {
 		/* In interlaced mode the same buffer is written twice, once
 		   the odd field and once the even field */
 		SAA716x_EPWR(MMU, MMU_PTA0_LSB(channel), PTA_LSB(dmabuf[0].mem_ptab_phys)); /* Low */
@@ -156,13 +157,21 @@ static int saa716x_vip_setparams(struct saa716x_dev *saa716x, int port,
 	base_offset = 0;
 	vin_format = 0x00004000;
 
-	if ((stream_params->stream_flags & VIP_INTERLACED) &&
-	    (stream_params->stream_flags & VIP_ODD_FIELD) &&
-	    (stream_params->stream_flags & VIP_EVEN_FIELD)) {
-		num_lines /= 2;
-		pitch *= 2;
-		base_offset = stream_params->pitch;
+	printk("%s: [VI%d] stream_flags=0x%x", __func__, port, stream_params->stream_flags);
+	if (stream_params->stream_flags & VIP_INTERLACED) {
+		if (stream_params->stream_flags & VIP_FIELD_ALTERNATE) {
+			num_lines /= 2;
+		} else if (stream_params->stream_flags & VIP_FIELD_SEQ) {
+			num_lines /= 2;
+			base_offset = stream_params->pitch * num_lines;
+		} else if ((stream_params->stream_flags & VIP_ODD_FIELD) &&
+				(stream_params->stream_flags & VIP_EVEN_FIELD)) {
+			num_lines /= 2;
+			pitch *= 2;
+			base_offset = stream_params->pitch;
+		}
 	}
+
 	if (stream_params->stream_flags & VIP_HD) {
 		if (stream_params->stream_flags & VIP_INTERLACED) {
 			vin_format |= 0x01000000;
@@ -220,7 +229,7 @@ static int saa716x_vip_setparams(struct saa716x_dev *saa716x, int port,
 	
 	/* set packet YUY2 output format */
 	//SAA716x_EPWR(vi_port, PSU_FORMAT, 0x800000A1);
-	SAA716x_EPWR(vi_port, PSU_FORMAT, 0x800020A0); // work properly for interlaced video
+	SAA716x_EPWR(vi_port, PSU_FORMAT, 0x800020A0);
 	//SAA716x_EPWR(vi_port, PSU_FORMAT, 0x880020A0); // for experiment
 
 	SAA716x_EPWR(vi_port, PSU_BASE1, base_address);
@@ -325,9 +334,7 @@ int saa716x_vip_start(struct saa716x_dev *saa716x, int port, int one_shot,
 	val = SAA716x_EPRD(vi_port, VI_MODE);
 	val &= ~(VID_CFEN | VID_FSEQ | VID_OSM | RST_ON_ERR);
 
-	if ((stream_params->stream_flags & VIP_INTERLACED) &&
-	    (stream_params->stream_flags & VIP_ODD_FIELD) &&
-	    (stream_params->stream_flags & VIP_EVEN_FIELD)) {
+	if (stream_params->stream_flags & VIP_INTERLACED) {
 		val |= VID_CFEN_BOTH; /* capture both fields */
 		val |= VID_FSEQ; /* start capture with odd field */
 	} else {
