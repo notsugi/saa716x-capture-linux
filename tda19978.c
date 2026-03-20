@@ -180,11 +180,11 @@ struct tda19978_state {
 	int chip_revision;
 
 	/* status info */
-	char hdmi_status;
-	char mptrw_in_progress;
-	char activity_status;
+	u8 hdmi_status;
+	u8 mptrw_in_progress;
+	u8 activity_status;
 	u8 input_detect[4];
-	u8 active_port;
+	u8 current_port;
 
 	/* video */
 	struct hdmi_avi_infoframe avi_infoframe;
@@ -685,14 +685,14 @@ static int tda19978_check_port(struct v4l2_subdev *sd) {
 		[4:3]: Port #
 		[2:0]: 0x101 when signal is good
 	*/
-	state->active_port = io_read(sd, 0x13F0);
-	reg = state->active_port & 0xE7;
+	state->current_port = io_read(sd, 0x13F0);
+	reg = state->current_port & 0xE7;
 	if (reg != 0x65) {
 		return 0;
 	}
 
-	reg = io_read(sd, 0x1120);
-	reg = io_read(sd, 0x1129);
+	//reg = io_read(sd, 0x1120);
+	//reg = io_read(sd, 0x1129);
 	return 1;
 }
 
@@ -944,6 +944,7 @@ static int
 tda19978_g_input_status(struct v4l2_subdev *sd, u32 *status)
 {
 	struct tda19978_state *state = to_state(sd);
+	int port_active;
 	u32 vper;
 	u16 hper;
 	u16 hsper;
@@ -956,14 +957,13 @@ tda19978_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	 * The tda19978 supports A/B/C/D inputs but only a single output.
 	 * I believe selection of A/B/C/D is automatic.
 	 */
-	tda19978_check_port(sd);
+	port_active = tda19978_check_port(sd);
 	
 	v4l2_dbg(1, debug, sd, "inputs:%d/%d/%d/%d timings:%d/%d/%d\n",
 		state->input_detect[0], state->input_detect[1],
 		state->input_detect[2], state->input_detect[3],
 		vper, hper, hsper);
-	if (!state->input_detect[0] && !state->input_detect[1] \
-		&& !state->input_detect[2] && state->input_detect[3])
+	if (!port_active)
 		*status = V4L2_IN_ST_NO_SIGNAL;
 	else if (!vper || !hper || !hsper)
 		*status = V4L2_IN_ST_NO_SYNC;

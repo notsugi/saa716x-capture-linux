@@ -16,7 +16,7 @@ Linux 5.15.0-164-generic x86_64
 
 ## 動作確認済みボード
 
-| Board | 備考                       |
+| Board | 備考 |
 | ----- | ------------------------- |
 | SKNET Monstar X3 |    |
 | Regia ONE, Regia TWO |    |
@@ -77,7 +77,6 @@ v4l2-ctl --all
 
 
 ## キャプチャの実行
-
 アプリケーションにキャプチャデータを正常に渡すために、入力信号のタイミングを元にボードを手動で設定する必要があります。
 
 ```
@@ -86,24 +85,21 @@ v4l2-ctl -d <X> --set-dv-bt-timings index=<N>
 ```
 
 解像度やリフレッシュレートの変更が生じる度に行ってください。
-アプリケーションにキャプチャデータを渡す準備ができたので、ffmpeg等でデバイスファイルを指定してキャプチャを開始できます。
+
+アプリケーションにキャプチャデータを渡す準備ができたので、ffmpeg等でデバイスファイルを指定してあげればキャプチャを開始できます。
 
 ```
 ffmpeg -f v4l2 -i /dev/video<X> capture.raw
 ```
 
-
-キャプチャ映像に水平方向の細いノイズが入る場合、おそらくCPUの省電力機能が影響しています。
-`cpupower`コマンドでC3,C6 stateを無効にしてみてください。
+### 補足
+* GUIアプリについては`qv4l2`でキャプチャできることを確認しています。
+* キャプチャ映像に水平方向の細いノイズが入る場合、おそらくCPUの省電力機能が影響しています。`cpupower`コマンドでC3,C6 stateを無効にしてみてください。
 
 ## 不具合・未実装の機能
 
-This driver is still under development and several areas require further work.
+本ドライバは開発中のため、不具合や未実装の機能があります。
 
-The following limitations are currently known:
-
-
-**インターレース入力に未対応**
 
 **HDMIイベントの割り込み処理が不完全**
 
@@ -111,8 +107,7 @@ The following limitations are currently known:
 
 **まれにフレーム落ちが発生する**
 
-Under certain conditions (e.g. high resolution or high frame rate capture), frame drops may occur.
-Further investigation of the DMA pipeline and buffer management is required.
+特定のアプリケーションと高フレームレート入力の組み合わせでコマ落ちが発生することがあります。DMAエンジンとvideobuf2フレームワークの間のバッファのやり取りに改善可能な点があるかもしれません。
 
 **音声キャプチャ機能がない**
 

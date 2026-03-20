@@ -141,7 +141,7 @@ static int queue_setup(struct vb2_queue *vq,
 			*/
 		if (vb2_fileio_is_active(vq))
 			return -EINVAL;
-		s->field = V4L2_FIELD_TOP;
+		//s->field = V4L2_FIELD_TOP;
 	}
 
 	if (vq->num_buffers + *nbuffers < 3)

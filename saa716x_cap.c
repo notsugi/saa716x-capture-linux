@@ -406,7 +406,7 @@ static void video_vip_worker(unsigned long data)
 		list_del(&cb->list);
 		spin_unlock(&s->qlock);
 		
-		cb->vb.field = s->field;
+		cb->vb.field = s->format.field;
 		cb->vb.vb2_buf.timestamp = ktime_get_ns();
 		cb->vb.sequence = s->sequence++;
 		vb2_buffer_done(&cb->vb.vb2_buf, VB2_BUF_STATE_DONE);
