@@ -84,15 +84,16 @@ static inline struct saa716x_cap_buffer *to_saa716x_cap_buffer(struct vb2_v4l2_b
 
 /*
  * HDTV: this structure has the capabilities of the HDTV receiver.
+	- V4L2_DV_BT_CEA_640X480P59_94
  */
 static const struct v4l2_dv_timings_cap saa716x_cap_timings_cap = {
 	.type = V4L2_DV_BT_656_1120,
 	/* keep this initialization for compatibility with GCC < 4.4.6 */
 	.reserved = { 0 },
 	V4L2_INIT_BT_TIMINGS(
-		720, 1920,		/* min/max width */
+		640, 1920,		/* min/max width */
 		480, 1080,		/* min/max height */
-		27000000, 74250000,	/* min/max pixelclock*/
+		25175000, 74250000,	/* min/max pixelclock*/
 		V4L2_DV_BT_STD_CEA861,	/* Supported standards */
 		/* capabilities */
 		V4L2_DV_BT_CAP_INTERLACED | V4L2_DV_BT_CAP_PROGRESSIVE
@@ -830,9 +831,19 @@ static int video_vip_get_stream_params_tda19978(struct saa716x_stream *s)
 	}
 
 	params->source_format = VIP_FMT_TYPE2;
+	/* offset_x/offset_y decides PSU_WINDOW */
 	switch (cea861_vic)
 	{
-	case 2: /* 720x480p60 */
+	case 1: /* 640x480p59.94 */
+		params->source_format = VIP_FMT_DEFAULT;
+		params->bits = 16;
+		params->samples = 640;
+		params->lines = 480;
+		params->pitch = 640 * 2;
+		params->offset_x = 0;
+		params->offset_y = 44;
+		break;
+	case 2: /* 720x480p59.94 */
 		params->source_format = VIP_FMT_DEFAULT;
 		params->bits = 16;
 		params->samples = 720;
@@ -874,7 +885,7 @@ static int video_vip_get_stream_params_tda19978(struct saa716x_stream *s)
 		params->lines = 1080;
 		params->pitch = 1920 * 2;
 		params->offset_x = 276;
-		params->offset_y = 0; // relate with PSU_WINDOW
+		params->offset_y = 0;
 		params->stream_flags = VIP_INTERLACED | VIP_HD;
 		break;
 	case 20: /* 1920x1080i50 */
@@ -928,6 +939,14 @@ static int video_vip_get_stream_params_adv7611(struct saa716x_stream *s)
 	params->source_format = VIP_FMT_DEFAULT;
 	switch (cea861_vic)
 	{
+	case 1: /* 640x480p59.94 */
+		params->bits = 16;
+		params->samples = 640;
+		params->lines = 480;
+		params->pitch = 640 * 2;
+		params->offset_x = 0;
+		params->offset_y = 44;
+		break;
 	case 2: /* 720x480p60 */
 		params->bits = 16;
 		params->samples = 720;

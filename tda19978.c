@@ -1273,7 +1273,7 @@ static int tda19978_log_status(struct v4l2_subdev *sd)
 			state->input_detect[0], state->input_detect[1],
 			state->input_detect[2], state->input_detect[3]);
 	if (active) {
-		v4l2_info(sd, "Port[%d] is active\n", (state->active_port & 0x18) >> 3);
+		v4l2_info(sd, "Port[%d] is active\n", (state->current_port & 0x18) >> 3);
 	} else {
 		v4l2_info(sd, "No Active Port\n");
 	}
