@@ -113,7 +113,6 @@ This driver is still under development and several areas require further work.
 
 The following limitations are currently known:
 
-**Interlaced video captureing is not supported**
 
 **HDMI event interrupt handling is implemented partially**
 
@@ -135,7 +134,6 @@ HDMI audio capture has not yet been implemented.
 
 Future work includes:
 
-* Interlaced video support
 * TDA19978 interrupt handling
 * Investigation and mitigation of frame drops during high-FPS capture
 * HDMI audio capture support
