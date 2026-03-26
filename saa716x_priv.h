@@ -18,6 +18,7 @@
 #include "saa716x_fgpi.h"
 #include "saa716x_spi.h"
 #include "saa716x_vip.h"
+#include "saa716x_aip.h"
 #include "saa716x_cap.h"
 
 #include <media/dvbdev.h>
@@ -210,6 +211,7 @@ struct saa716x_dev {
 	/* DMA */
 	struct saa716x_fgpi_stream_port	fgpi[4];
 	struct saa716x_vip_stream_port	vip[2];
+	struct saa716x_aip_stream_port	aip[2];
 
 	u32					id_offst;
 	u32					id_len;

@@ -1009,11 +1009,11 @@ static int video_vip_get_stream_params_adv7611(struct saa716x_stream *s)
 	}
 
 	if (s->format.field == V4L2_FIELD_ALTERNATE) {
-		s->vip_params.stream_flags |= VIP_FIELD_ALTERNATE;
+		params->stream_flags |= VIP_FIELD_ALTERNATE;
 	} else if (s->format.field == V4L2_FIELD_SEQ_TB) {
-		s->vip_params.stream_flags |= VIP_FIELD_SEQ;
+		params->stream_flags |= VIP_FIELD_SEQ;
 	} else if (s->format.field == V4L2_FIELD_INTERLACED) {
-		s->vip_params.stream_flags |= (VIP_ODD_FIELD | VIP_EVEN_FIELD);
+		params->stream_flags |= (VIP_ODD_FIELD | VIP_EVEN_FIELD);
 	}
 
 	return 0;

@@ -46,6 +46,7 @@ MODULE_PARM_DESC(int_type, "force Interrupt Handler type: 0=INT-A, 1=MSI, 2=MSI-
 #define DRIVER_NAME	"SAA716x Capture"
 
 static void video_vip_worker(unsigned long data);
+static void audio_aip_worker(unsigned long data);
 void saa716x_irq_work_handler(struct work_struct *work);
 
 /*
@@ -227,7 +228,8 @@ static int saa716x_cap_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 		dprintk(SAA716x_ERROR, 1, "SAA716x VIP initialization failed");
 		goto fail3;
 	}
-
+	err = saa716x_aip_init2(saa716x, 0, audio_aip_worker);
+	
 	err = saa716x_v4l2_init(saa716x);
 	if (err) {
 		dprintk(SAA716x_ERROR, 1, "SAA716x V4L2 initialization failed");
@@ -260,6 +262,7 @@ static void saa716x_cap_pci_remove(struct pci_dev *pdev)
 	saa716x_remove_debugfs(saa716x);
 	flush_workqueue(saa716x->irq_work_queue);
 	saa716x_v4l2_exit(saa716x);
+	saa716x_aip_exit2(saa716x, 0);
 	saa716x_vip_exit2(saa716x, saa716x->config->capture_config.vip_port);
 	saa716x_i2c_exit(saa716x);
 	destroy_workqueue(saa716x->irq_work_queue);
@@ -340,7 +343,7 @@ static irqreturn_t saa716x_cap_pci_irq(int irq, void *dev_id)
 			tasklet_schedule(&saa716x->vip[1].tasklet);
 		}
 		if (stat_l & MSI_INT_TAGACK_AI_0) {
-
+			tasklet_schedule(&saa716x->aip[0].tasklet);
 		}
 	}
 
@@ -354,6 +357,14 @@ static irqreturn_t saa716x_cap_pci_irq(int irq, void *dev_id)
 	}
 
 	return IRQ_HANDLED;
+}
+
+/* Service routine to handle interrupts from receiver */
+void saa716x_irq_work_handler(struct work_struct *work)
+{
+	struct saa716x_dev *saa716x = container_of(work, struct saa716x_dev, irq_work);
+	
+	v4l2_subdev_call(saa716x->saa716x_stream[0].sd_receiver, core, interrupt_service_routine, 0, NULL);
 }
 
 static void video_vip_worker(unsigned long data)
@@ -416,12 +427,42 @@ static void video_vip_worker(unsigned long data)
 	} while (write_index != vip_entry->read_index);
 }
 
-/* Service routine to handle interrupts from receiver */
-void saa716x_irq_work_handler(struct work_struct *work) {
-	struct saa716x_dev *saa716x = container_of(work, struct saa716x_dev, irq_work);
-	
-	v4l2_subdev_call(saa716x->saa716x_stream[0].sd_receiver, core, interrupt_service_routine, 0, NULL);
+static void audio_aip_worker(unsigned long data)
+{
+	struct saa716x_aip_stream_port *aip_entry = (struct saa716x_aip_stream_port *)data;
+	struct saa716x_dev *saa716x = aip_entry->saa716x;
+	u32 ai_port, dma_ch_num;
+	u32 write_index;
+
+	dma_ch_num = aip_entry->dma_channel;
+	if (dma_ch_num == 10) {
+		ai_port = 0;
+	} else if (dma_ch_num == 11) {
+		ai_port = 1;
+	} else {
+		printk(KERN_ERR "%s: unexpected channel %u\n",
+		       __func__, aip_entry->dma_channel);
+		return;
+	}
+
+	write_index = saa716x_aip_get_write_index(saa716x, ai_port);
+	dprintk(SAA716x_DEBUG, 1, "write_index = %d", write_index);
+
+	if (write_index == aip_entry->read_index) {
+		printk(KERN_DEBUG "%s: called but nothing to do\n", __func__);
+		return;
+	}
+
+	do {
+		pci_dma_sync_sg_for_cpu(saa716x->pdev,
+			aip_entry->dma_buf[aip_entry->read_index].sg_list,
+			aip_entry->dma_buf[aip_entry->read_index].list_len,
+			PCI_DMA_FROMDEVICE);
+		
+		aip_entry->read_index = (aip_entry->read_index + 1) & 7;
+	} while (write_index != aip_entry->read_index);
 }
+
 
 /* Driver data */
 static struct saa716x_config saa716x_cap_generic_config = {

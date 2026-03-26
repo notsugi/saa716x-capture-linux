@@ -9,18 +9,24 @@
 #include "saa716x_priv.h"
 #include "saa716x_cap.h"
 #include "saa716x_vip_reg.h"
+#include "saa716x_aip_reg.h"
 #include "saa716x_mod.h"
 #include "saa716x_debugfs.h"
 
 
 static const u32 vi_ch[] = {
-    VI0,
-    VI1
+	VI0,
+	VI1
+};
+
+static const u32 ai_ch[] = {
+	AI0,
+	AI1
 };
 
 struct saa716x_debugfs_data {
-    unsigned int    size;
-    struct mutex	mutex;
+	unsigned int    size;
+	struct mutex	mutex;
 };
 
 /*
@@ -94,7 +100,7 @@ static int video_vip_get_stream_params_tda19978(struct vip_stream_params *params
 	return 0;
 }
 
-static int video_vip_get_stream_params_tda19978_orig(struct vip_stream_params *params, struct v4l2_dv_timings *timings)
+static int video_vip_get_stream_params_tda19978_old(struct vip_stream_params *params, struct v4l2_dv_timings *timings)
 {
     u8 cea861_vic;
     if (timings->type == V4L2_DV_BT_656_1120 && (timings->bt.flags & V4L2_DV_FL_HAS_CEA861_VIC)){
@@ -240,91 +246,132 @@ static ssize_t video_vip_read(struct saa716x_dev *saa716x,
                               struct vip_stream_params *stream_params,
                               char __user *buf, size_t count)
 {
-    int vi_port, one_shot;
-    size_t num_bytes = 0;
-    size_t copy_bytes;
-    u32 read_index;
-    u8 *data;
-    int err = 0;
+	int vi_port, one_shot;
+	size_t num_bytes = 0;
+	size_t copy_bytes;
+	u32 read_index;
+	u8 *data;
+	int err = 0;
 
-    vi_port = saa716x->config->capture_config.vip_port;
-    one_shot = 1;
+	vi_port = saa716x->config->capture_config.vip_port;
+	one_shot = 1;
 
-    if (count > stream_params->lines * stream_params->pitch)
-        count = stream_params->lines * stream_params->pitch;
+	if (count > stream_params->lines * stream_params->pitch)
+		count = stream_params->lines * stream_params->pitch;
 
-    saa716x_vip_start(saa716x, vi_port, one_shot, stream_params);
-    /* Sleep long enough to be sure to capture at least one frame.
-    TODO: Change this in a way that it just waits the required time. */
-    msleep(100);
-    saa716x_vip_stop(saa716x, vi_port);
+	saa716x_vip_start(saa716x, vi_port, one_shot, stream_params);
+	/* Sleep long enough to be sure to capture at least one frame.
+	TODO: Change this in a way that it just waits the required time. */
+	msleep(100);
+	saa716x_vip_stop(saa716x, vi_port);
 
-    read_index = saa716x->vip[vi_port].read_index;
-    printk("%s: read_index = %d", __func__, read_index);
+	read_index = saa716x->vip[vi_port].read_index;
+	printk("%s: read_index = %d", __func__, read_index);
 
-    if ((stream_params->stream_flags & VIP_INTERLACED) &&
-        (stream_params->stream_flags & VIP_ODD_FIELD) &&
-        (stream_params->stream_flags & VIP_EVEN_FIELD))
-    {
-        read_index = read_index & ~1;
-        read_index = (read_index + 7) & 7;
-        read_index = read_index / 2;
-    }
-    else
-    {
-        read_index = (read_index + 7) & 7;
-    }
+	if ((stream_params->stream_flags & VIP_INTERLACED) &&
+		(stream_params->stream_flags & VIP_ODD_FIELD) &&
+		(stream_params->stream_flags & VIP_EVEN_FIELD))
+	{
+		read_index = read_index & ~1;
+		read_index = (read_index + 7) & 7;
+		read_index = read_index / 2;
+	}
+	else
+	{
+		read_index = (read_index + 7) & 7;
+	}
 
-    copy_bytes = count;
-    if (copy_bytes > (SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE))
-        copy_bytes = SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE;
-    data = (u8 *)saa716x->vip[vi_port].dma_buf[0][read_index].mem_virt;
-    if (copy_to_user((void __user *)(buf + num_bytes), data, copy_bytes))
-    {
-        err = -EFAULT;
-        goto out;
-    }
-    num_bytes += copy_bytes;
-    if (saa716x->vip[vi_port].dual_channel &&
-        count - num_bytes > 0)
-    {
-        copy_bytes = count - num_bytes;
-        if (copy_bytes > (SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE))
-            copy_bytes = SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE;
-        data = (u8 *)saa716x->vip[vi_port].dma_buf[1][read_index].mem_virt;
-        if (copy_to_user((void __user *)(buf + num_bytes), data,
-                         copy_bytes))
-        {
-            err = -EFAULT;
-            goto out;
-        }
-        num_bytes += copy_bytes;
-    }
-    printk("%s: %ld bytes copied to userspace buffer", __func__, num_bytes);
-    return num_bytes;
+	copy_bytes = count;
+	if (copy_bytes > (SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE))
+		copy_bytes = SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE;
+	data = (u8 *)saa716x->vip[vi_port].dma_buf[0][read_index].mem_virt;
+	if (copy_to_user((void __user *)(buf + num_bytes), data, copy_bytes))
+	{
+		err = -EFAULT;
+		goto out;
+	}
+	num_bytes += copy_bytes;
+	if (saa716x->vip[vi_port].dual_channel &&
+		count - num_bytes > 0)
+	{
+		copy_bytes = count - num_bytes;
+		if (copy_bytes > (SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE))
+			copy_bytes = SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE;
+		data = (u8 *)saa716x->vip[vi_port].dma_buf[1][read_index].mem_virt;
+		if (copy_to_user((void __user *)(buf + num_bytes), data,
+							copy_bytes))
+		{
+			err = -EFAULT;
+			goto out;
+		}
+		num_bytes += copy_bytes;
+	}
+	printk("%s: %ld bytes copied to userspace buffer", __func__, num_bytes);
+	return num_bytes;
 
 out:
-    return err;
+	return err;
 }
 
 static int saa716x_debugfs_open(struct inode *inode, struct file *file)
 {
-    struct saa716x_dev *saa716x = (struct saa716x_dev*)inode->i_private;
-    file->private_data = saa716x;
-    printk("%s: debugfs opened", __func__);
-    /*
+	struct saa716x_dev *saa716x = (struct saa716x_dev*)inode->i_private;
+	file->private_data = saa716x;
+	printk("%s: debugfs opened", __func__);
+	/*
 	struct saa716x_debugfs_data *debug_data;
-    debug_data = kzalloc(sizeof(*debug_data), GFP_KERNEL);
+	debug_data = kzalloc(sizeof(*debug_data), GFP_KERNEL);
 	if (!debug_data)
-    return -ENOMEM;
-	
-    mutex_init(&debug_data->mutex);
+	return -ENOMEM;
+
+	mutex_init(&debug_data->mutex);
 	file->private_data = debug_data;
-    */
-    return nonseekable_open(inode, file);
+	*/ 
+	return nonseekable_open(inode, file);
 }
 
-static ssize_t saa716x_debugfs_read(struct file *file, char *buf, size_t len, loff_t *off)
+static ssize_t saa716x_debugfs_aip_read(struct file *file, char *buf, size_t len, loff_t *off)
+{
+	struct saa716x_dev *saa716x = (struct saa716x_dev*)file->private_data;
+	struct aip_stream_params param;
+	size_t copy_bytes, num_bytes = 0;
+	u32 val, read_index;
+	int ai_port = 0;
+	u8 *data;
+	int err = 0;
+
+	saa716x_aip_start(saa716x, ai_port, &param);
+	msleep(300);
+	val = SAA716x_EPRD(ai_ch[ai_port], AI_STATUS);
+	printk("%s: [AI%d] AI_STATUS = 0x%x", __func__, ai_port, val);
+	saa716x_aip_stop(saa716x, ai_port);
+	saa716x_aip_disable(saa716x);
+
+	copy_bytes = len;
+	if (copy_bytes > (SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE))
+		copy_bytes = SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE;
+
+	read_index = saa716x->aip[ai_port].read_index;
+	//read_index = 2;
+	printk("%s: read_index = %d", __func__, read_index);
+
+	//read_index = (read_index + 7) & 7;
+	data = (u8 *)saa716x->aip[ai_port].dma_buf[read_index].mem_virt;
+
+	if (copy_to_user((void __user *)(buf), data, copy_bytes))
+	{
+		err = -EFAULT;
+		goto out;
+	}
+	num_bytes += copy_bytes;
+
+	printk("%s: %ld bytes copied to userspace buffer", __func__, num_bytes);
+	return num_bytes;
+out:
+	return err;
+}
+
+static ssize_t saa716x_debugfs_vip_read(struct file *file, char *buf, size_t len, loff_t *off)
 {   
     struct saa716x_dev *saa716x = (struct saa716x_dev*)file->private_data;
     struct vip_stream_params stream_params;
@@ -368,21 +415,27 @@ static ssize_t saa716x_debugfs_read(struct file *file, char *buf, size_t len, lo
     return retval;
 }
 
+static ssize_t saa716x_debugfs_read(struct file *file, char *buf, size_t len, loff_t *off)
+{
+    return saa716x_debugfs_aip_read(file, buf, len, off);
+    //return saa716x_debugfs_vip_read(file, buf, len, off);
+}
+
 static ssize_t saa716x_debugfs_write(struct file *file, const char *buf, size_t len,  loff_t *off)
 {  
-    return 0;
+	return 0;
 }
 
 static int saa716x_debugfs_release(struct inode *inode, struct file *file)
 {   
-    //kfree(file->private_data);
-    struct saa716x_dev *saa716x = (struct saa716x_dev*)file->private_data;
-    u32 port = saa716x->config->capture_config.vip_port;
+	//kfree(file->private_data);
+	struct saa716x_dev *saa716x = (struct saa716x_dev*)file->private_data;
+	u32 port = saa716x->config->capture_config.vip_port;
 
-    SAA716x_EPWR(vi_ch[port], VI_MODE, SOFT_RESET);
-    
-    printk("%s: debugfs released", __func__);
-    return 0;
+	SAA716x_EPWR(vi_ch[port], VI_MODE, SOFT_RESET);
+
+	printk("%s: debugfs released", __func__);
+	return 0;
 }
 
 static const struct file_operations saa716x_debugfs_fops = {
@@ -395,27 +448,27 @@ static const struct file_operations saa716x_debugfs_fops = {
 
 int saa716x_make_debugfs(struct saa716x_dev *saa716x)
 {
-    struct dentry *root, *file;
+	struct dentry *root, *file;
 
-    root = debugfs_create_dir("saa716x", NULL);
-    if (!root)
-        return -ENOMEM;
-    
-    saa716x->debugfs_root = root;
+	root = debugfs_create_dir("saa716x", NULL);
+	if (!root)
+		return -ENOMEM;
+
+	saa716x->debugfs_root = root;
 	file = debugfs_create_file("debug", 0644, root, saa716x, &saa716x_debugfs_fops);
 	if (!file) {
 		debugfs_remove(root);
-        return -ENOMEM;
-    }
+		return -ENOMEM;
+	}
 
-    return 0;
+	return 0;
 }
 EXPORT_SYMBOL(saa716x_make_debugfs);
 
 int saa716x_remove_debugfs(struct saa716x_dev *saa716x)
 {
-    debugfs_remove_recursive(saa716x->debugfs_root);
+	debugfs_remove_recursive(saa716x->debugfs_root);
 
-    return 0;
+	return 0;
 }
 EXPORT_SYMBOL(saa716x_remove_debugfs);

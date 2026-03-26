@@ -207,7 +207,7 @@ void saa716x_dmabuf_sgpagefill(struct saa716x_dmabuf *dmabuf, struct scatterlist
 			BUG_ON(page[k * 2] % SAA716x_PAGE_SIZE);
 
 			if (sg_changed) {
-				dprintk(SAA716x_DEBUG, 1, "PTE[%d] = 0x%llx", k, addr);
+				//dprintk(SAA716x_DEBUG, 1, "PTE[%d] = 0x%llx", k, addr);
 				sg_changed = 0;
 			}
 			k++;
