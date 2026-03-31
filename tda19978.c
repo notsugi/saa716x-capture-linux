@@ -180,9 +180,9 @@ struct tda19978_state {
 	int chip_revision;
 
 	/* status info */
-	u8 hdmi_status;
 	u8 mptrw_in_progress;
 	u8 activity_status;
+	u8 irq_status[7];
 	u8 input_detect[4];
 	u8 current_port;
 
@@ -198,7 +198,7 @@ struct tda19978_state {
 	u8 vid_fmt;
 
 	/* controls */
-	struct i2c_client *client_hpd;	// PCA9536
+	struct i2c_client *client_hpd;	// PCA9536 client
 	struct v4l2_ctrl_handler hdl;
 	struct v4l2_ctrl *rgb_quantization_range_ctrl;
 
@@ -686,6 +686,12 @@ static int tda19978_check_port(struct v4l2_subdev *sd) {
 		[2:0]: 0x101 when signal is good
 	*/
 	state->current_port = io_read(sd, 0x13F0);
+
+	v4l2_info(sd, "HDMI Port status: 0x%02x/0x%02x/0x%02x/0x%02x",
+		state->input_detect[0], state->input_detect[1],
+		state->input_detect[2], state->input_detect[3]);
+	v4l2_info(sd, "Current Port status: 0x%02x", state->current_port);
+
 	reg = state->current_port & 0xE7;
 	if (reg != 0x65) {
 		return 0;
@@ -717,7 +723,7 @@ tda19978_detect_std(struct tda19978_state *state,
 	hsper = io_read16(sd, REG_HS_WIDTH) & MASK_HSWIDTH;
 	v4l2_dbg(1, debug, sd, "Signal Timings: %u/%u/%u\n", vper, hper, hsper);
 
-	if (!tda19978_check_port(sd))
+	if ((state->current_port & 0xE7) != 0x65)
 		return -ENOLINK;
 	
 	for (i = 0; v4l2_dv_timings_presets[i].bt.width; i++) {
@@ -896,12 +902,63 @@ tda19978_parse_infoframe(struct tda19978_state *state, u16 addr)
 	return 0;
 }
 
-/* Not implemented yet */
-static irqreturn_t tda19978_isr_thread(int irq, void *d)
+static int tda19978_isr(struct v4l2_subdev *sd, u32 status, bool *handled)
 {
-	struct tda19978_state *state = d;
-	struct v4l2_subdev *sd = &state->sd;
+	struct tda19978_state *state = to_state(sd);
+	int i;
 	u8 flags;
+	
+	mutex_lock(&state->lock);
+	io_write(sd, 0x000D, 0x0B);
+	io_readn(sd, 0x000E, 7, state->irq_status);
+
+	for(i = 0; i < 7; i++) {
+		if(state->irq_status[i]) {
+			printk("%s: INT type[%d] = 0x%02x", __func__, i, state->irq_status[i]);
+			if(i == 4 || i == 5) {
+				/* To clear port activity flag, use this way */
+				io_write(sd, 0x000E + i, state->irq_status[i] << 1);
+			} else {
+				io_write(sd, 0x000E + i, state->irq_status[i]);
+			}
+		}
+	}
+
+	if(state->irq_status[0] & 0x0f) {
+		tda19978_check_port(sd);
+	}
+	if(state->irq_status[1] & 0xf0) {
+		tda19978_check_port(sd);
+	}
+	if(state->irq_status[1] & 0x08) {
+		tda19978_parse_infoframe(state, AVI_IF);
+	}
+	if(state->irq_status[1] & 0x04) { 
+		tda19978_parse_infoframe(state, SPD_IF);
+	}
+	if(state->irq_status[1] & 0x02) {
+		tda19978_parse_infoframe(state, AUD_IF);
+	}
+	if(state->irq_status[1] & 0x01) {
+		printk("%s: unknown irq_status[1]=0x01", __func__);
+	}
+	if(state->irq_status[2]) {
+		/* HDMI Packet ? */
+	}
+	if(state->irq_status[4] || state->irq_status[5]) {
+		tda19978_check_port(sd);
+	}
+	if(state->irq_status[6]) {
+		/*  */
+		//tda19978_check_port(sd);
+	}
+	
+	mutex_unlock(&state->lock);
+
+
+	if(handled)
+		*handled = true;
+
 #if 0
 	mutex_lock(&state->lock);
 	do {
@@ -933,7 +990,7 @@ static irqreturn_t tda19978_isr_thread(int irq, void *d)
 	} while (flags != 0);
 	mutex_unlock(&state->lock);
 #endif
-	return IRQ_HANDLED;
+	return 0;
 }
 
 /* -----------------------------------------------------------------------------
@@ -944,7 +1001,6 @@ static int
 tda19978_g_input_status(struct v4l2_subdev *sd, u32 *status)
 {
 	struct tda19978_state *state = to_state(sd);
-	int port_active;
 	u32 vper;
 	u16 hper;
 	u16 hsper;
@@ -957,13 +1013,12 @@ tda19978_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	 * The tda19978 supports A/B/C/D inputs but only a single output.
 	 * I believe selection of A/B/C/D is automatic.
 	 */
-	port_active = tda19978_check_port(sd);
 	
 	v4l2_dbg(1, debug, sd, "inputs:%d/%d/%d/%d timings:%d/%d/%d\n",
 		state->input_detect[0], state->input_detect[1],
 		state->input_detect[2], state->input_detect[3],
 		vper, hper, hsper);
-	if (!port_active)
+	if ((state->current_port & 0xE7) != 0x65)
 		*status = V4L2_IN_ST_NO_SIGNAL;
 	else if (!vper || !hper || !hsper)
 		*status = V4L2_IN_ST_NO_SYNC;
@@ -1260,14 +1315,11 @@ static int tda19978_log_status(struct v4l2_subdev *sd)
 	struct hdmi_avi_infoframe *avi = &state->avi_infoframe;
 	int active;
 
-	tda19978_parse_infoframe(state, AUD_IF);
-	tda19978_parse_infoframe(state, AVI_IF);
-
 	v4l2_info(sd, "-----Chip status-----\n");
 	v4l2_info(sd, "Chip: %s\n", state->info->name);
 	v4l2_info(sd, "EDID Enabled: %s\n", state->edid.present ? "yes" : "no");
 
-	active = tda19978_check_port(sd);
+	active = (state->current_port & 0xE7) == 0x65;
 	v4l2_info(sd, "-----Signal status-----\n");
 	v4l2_info(sd, "Port status: 0x%02x/0x%02x/0x%02x/0x%02x",
 			state->input_detect[0], state->input_detect[1],
@@ -1325,6 +1377,7 @@ static int tda19978_log_status(struct v4l2_subdev *sd)
 
 static const struct v4l2_subdev_core_ops tda19978_core_ops = {
 	.log_status = tda19978_log_status,
+	.interrupt_service_routine = tda19978_isr,
 	.subscribe_event = NULL,
 	.unsubscribe_event = NULL,//v4l2_event_subdev_unsubscribe,
 };
@@ -1787,17 +1840,8 @@ static int tda19978_probe(struct i2c_client *client,
 	v4l_info(state->client, "registered audio codec\n");
 	*/
 
-	/* request irq */
-	/*
-	ret = devm_request_threaded_irq(&client->dev, client->irq,
-					NULL, tda19978_isr_thread,
-					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
-					KBUILD_MODNAME, state);
-	if (ret) {
-		v4l_err(client, "irq%d reg failed: %d\n", client->irq, ret);
-		goto err_free_media;
-	}
-	*/
+	/* clear flags manually */
+	tda19978_isr(sd, 0, NULL);
 	printk("%s: Done.", __func__);
 
 	return 0;
