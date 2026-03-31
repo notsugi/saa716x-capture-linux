@@ -20,6 +20,7 @@ saa716x_ff-objs	:= saa716x_ff_main.o	\
 
 saa716x_capture-objs := saa716x_cap.o	\
 				saa716x_v4l2.o	\
+				saa716x_alsa.o	\
 				saa716x_debugfs.o
 
 obj-$(CONFIG_SAA716X_CORE)		+= saa716x_core.o

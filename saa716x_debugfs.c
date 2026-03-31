@@ -333,37 +333,45 @@ static int saa716x_debugfs_open(struct inode *inode, struct file *file)
 static ssize_t saa716x_debugfs_aip_read(struct file *file, char *buf, size_t len, loff_t *off)
 {
 	struct saa716x_dev *saa716x = (struct saa716x_dev*)file->private_data;
+	enum saa716x_capture_subdev sd_type = saa716x->config->capture_config.subdev;
 	struct aip_stream_params param;
 	size_t copy_bytes, num_bytes = 0;
 	u32 val, read_index;
 	int ai_port = 0;
 	u8 *data;
-	int err = 0;
+	int i, err = 0;
 
+	if(sd_type == SAA716x_SUBDEV_TDA19978) {
+		param.ai_size = 0x0640;
+	} else {
+		param.ai_size = 0x05c0;
+	}
 	saa716x_aip_start(saa716x, ai_port, &param);
-	msleep(300);
+	msleep(270);
 	val = SAA716x_EPRD(ai_ch[ai_port], AI_STATUS);
 	printk("%s: [AI%d] AI_STATUS = 0x%x", __func__, ai_port, val);
 	saa716x_aip_stop(saa716x, ai_port);
-	saa716x_aip_disable(saa716x);
+	//SAA716x_EPWR(ai_ch[ai_port], AI_CTL, AI_RESET);
+	//saa716x_aip_disable(saa716x);
 
 	copy_bytes = len;
-	if (copy_bytes > (SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE))
-		copy_bytes = SAA716x_PAGE_SIZE / 8 * SAA716x_PAGE_SIZE;
+	if (copy_bytes > param.ai_size * 4)
+		copy_bytes = param.ai_size * 4;
 
 	read_index = saa716x->aip[ai_port].read_index;
 	//read_index = 2;
 	printk("%s: read_index = %d", __func__, read_index);
 
 	//read_index = (read_index + 7) & 7;
-	data = (u8 *)saa716x->aip[ai_port].dma_buf[read_index].mem_virt;
-
-	if (copy_to_user((void __user *)(buf), data, copy_bytes))
-	{
-		err = -EFAULT;
-		goto out;
+	for(read_index = 0; read_index < AIP_BUFFERS; read_index++) {
+		data = (u8 *)saa716x->aip[ai_port].dma_buf[read_index].mem_virt;
+		if (copy_to_user((void __user *)(buf+num_bytes), data, copy_bytes))
+		{
+			err = -EFAULT;
+			goto out;
+		}
+		num_bytes += copy_bytes;
 	}
-	num_bytes += copy_bytes;
 
 	printk("%s: %ld bytes copied to userspace buffer", __func__, num_bytes);
 	return num_bytes;

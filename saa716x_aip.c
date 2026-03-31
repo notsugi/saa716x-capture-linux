@@ -92,9 +92,10 @@ static int saa716x_aip_setparams(struct saa716x_dev *saa716x, int port,
 	//SAA716x_EPWR(ai_port, AI_SIZE, 0x0640); // TDA19978
 	//SAA716x_EPWR(ai_port, AI_SIZE, 0x05c0); // ADV7611
 	/* s16le 2ch = 4bytes per sample
-	 * 0x5c0 * 4 = 0x1700
+	 * 0x5c0 * 4 = 0x1700 bytes written in each buffer
+	 * 0x640 * 4 = 0x1900 bytes
 	 */
-	SAA716x_EPWR(ai_port, AI_SIZE, 0x0640);
+	SAA716x_EPWR(ai_port, AI_SIZE, stream_params->ai_size);
 
 	SAA716x_EPWR(ai_port, AI_BASE1, base_address);
 	SAA716x_EPWR(ai_port, AI_BASE2, base_address);

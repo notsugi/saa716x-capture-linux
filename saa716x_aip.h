@@ -8,7 +8,7 @@
 struct aip_stream_params {
 	u32			bits;
 	u32			sample_rate;
-	u32			sample_len;
+	u32			ai_size;
 };
 
 struct saa716x_dev;

@@ -94,6 +94,7 @@ struct saa716x_msix_entry {
 struct saa716x_dev;
 struct saa716x_adapter;
 struct saa716x_spi_config;
+struct snd_saa716x_card;
 
 struct saa716x_adap_config {
 	u32				ts_port;
@@ -181,6 +182,8 @@ struct saa716x_dev {
 	/* V4L2 (For Capture) */
 	struct v4l2_device			v4l2_dev;
 	struct saa716x_stream		saa716x_stream[SAA716x_MAX_STREAMS];
+	/* ALSA */
+	struct snd_saa716x_card		*alsa;
 
 	/* PCI */
 	u8 					revision;
@@ -237,9 +240,10 @@ extern void saa716x_msiint_disable(struct saa716x_dev *saa716x);
 extern int saa716x_dma_init(struct saa716x_dev *saa716x);
 extern void saa716x_dma_exit(struct saa716x_dev *saa716x);
 
-/* AUDIO */
-extern int saa716x_audio_init(struct saa716x_dev *saa716x);
-extern void saa716x_audio_exit(struct saa716x_dev *saa716x);
+/* ALSA */
+extern int saa716x_alsa_init(struct saa716x_dev *saa716x);
+extern void saa716x_alsa_exit(struct saa716x_dev *saa716x);
+extern void saa716x_alsa_deliver_buffer(struct saa716x_dev *saa716x);
 
 /* Boot */
 extern int saa716x_core_boot(struct saa716x_dev *saa716x);

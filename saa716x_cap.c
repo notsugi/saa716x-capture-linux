@@ -229,20 +229,31 @@ static int saa716x_cap_pci_probe(struct pci_dev *pdev, const struct pci_device_i
 		goto fail3;
 	}
 	err = saa716x_aip_init2(saa716x, 0, audio_aip_worker);
-	
-	err = saa716x_v4l2_init(saa716x);
 	if (err) {
-		dprintk(SAA716x_ERROR, 1, "SAA716x V4L2 initialization failed");
+		dprintk(SAA716x_ERROR, 1, "SAA716x AIP initialization failed");
 		goto fail4;
 	}
 
+	err = saa716x_v4l2_init(saa716x);
+	if (err) {
+		dprintk(SAA716x_ERROR, 1, "SAA716x V4L2 initialization failed");
+		goto fail5;
+	}
+
+	err = saa716x_alsa_init(saa716x);
+	if (err) {
+		dprintk(SAA716x_ERROR, 1, "SAA716x ALSA initialization failed");
+		goto fail6;
+	}
 
 	err = saa716x_make_debugfs(saa716x);
 
 	return 0;
 
-fail5:
+fail6:
 	saa716x_v4l2_exit(saa716x);
+fail5:
+	saa716x_aip_exit2(saa716x, 0);
 fail4:
 	saa716x_vip_exit2(saa716x, saa716x->config->capture_config.vip_port);
 fail3:
@@ -261,6 +272,7 @@ static void saa716x_cap_pci_remove(struct pci_dev *pdev)
 
 	saa716x_remove_debugfs(saa716x);
 	flush_workqueue(saa716x->irq_work_queue);
+	saa716x_alsa_exit(saa716x);
 	saa716x_v4l2_exit(saa716x);
 	saa716x_aip_exit2(saa716x, 0);
 	saa716x_vip_exit2(saa716x, saa716x->config->capture_config.vip_port);
@@ -349,7 +361,7 @@ static irqreturn_t saa716x_cap_pci_irq(int irq, void *dev_id)
 
 	if (stat_h) {
 		if (stat_h & MSI_INT_EXTINT_5) {
-			//queue_work(saa716x->irq_work_queue, &saa716x->irq_work);
+			queue_work(saa716x->irq_work_queue, &saa716x->irq_work);
 		}
 		if (stat_h & MSI_INT_EXTINT_6) {
 			queue_work(saa716x->irq_work_queue, &saa716x->irq_work);
@@ -458,7 +470,7 @@ static void audio_aip_worker(unsigned long data)
 			aip_entry->dma_buf[aip_entry->read_index].sg_list,
 			aip_entry->dma_buf[aip_entry->read_index].list_len,
 			PCI_DMA_FROMDEVICE);
-		
+		saa716x_alsa_deliver_buffer(saa716x);
 		aip_entry->read_index = (aip_entry->read_index + 1) & 7;
 	} while (write_index != aip_entry->read_index);
 }
