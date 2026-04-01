@@ -86,11 +86,12 @@ static void snd_saa716x_announce_pcm_data(struct snd_saa716x_card *saa716x_sc,
 		spin_unlock_irqrestore(&saa716x_sc->slock, flags);
 		return;
 	}
-
+	
 	memcpy(runtime->dma_area + (frames_to_bytes(runtime, runtime->period_size) * aip->read_index),
 			aip->dma_buf[aip->read_index].mem_virt,
 			frames_to_bytes(runtime, runtime->period_size));
-	saa716x_sc->hwptr_done_capture = (aip->read_index + 1) * frames_to_bytes(runtime, runtime->period_size);
+	/* hwptr is frame position, not bytes position */
+	saa716x_sc->hwptr_done_capture = ((aip->read_index + 1) & 7) * runtime->period_size;
 
 	spin_unlock_irqrestore(&saa716x_sc->slock, flags);
 	
@@ -201,8 +202,6 @@ snd_saa716x_pcm_pointer(struct snd_pcm_substream *substream)
 	struct snd_saa716x_card *saa716x_sc = snd_pcm_substream_chip(substream);
 	unsigned long flags;
 	snd_pcm_uframes_t hwptr_done;
-
-	printk("%s: called", __func__);
 
 	spin_lock_irqsave(&saa716x_sc->slock, flags);
 	hwptr_done = saa716x_sc->hwptr_done_capture;
